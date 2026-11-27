@@ -173,9 +173,44 @@ async function train(db,user,obj,today){
     day,user.login,obj.result,Number(obj.id),employee,user.role,user.dc,user.dept,day).run();
   requireValue(result.meta.changes===1,'ตรวจสอบพนักงานและ Rev. ที่มีผลในวันที่อบรม');
 }
+// This helper runs in the administrator's browser. Only D1 Console can apply its output.
+function recoverPage(){
+  const nonce=crypto.randomUUID().replaceAll('-','');
+  const script=`const encoder=new TextEncoder();
+function hex(bytes){
+  return Array.from(new Uint8Array(bytes),b=>b.toString(16).padStart(2,'0')).join('');
+}
+async function passwordDigest(password,salt){
+  const key=await crypto.subtle.importKey('raw',encoder.encode(password),'PBKDF2',false,['deriveBits']);
+  const bits=await crypto.subtle.deriveBits({name:'PBKDF2',hash:'SHA-256',iterations:100000,salt},key,256);
+  return hex(bits);
+}
+
+  const form=document.querySelector('form');
+  const output=document.querySelector('textarea');
+  const message=document.querySelector('[role="status"]');
+  form.addEventListener('input',()=>{output.value='';message.textContent='';});
+  form.addEventListener('submit',async event=>{
+    event.preventDefault();
+    const password=form.elements.password.value;
+    if(password!==form.elements.confirm.value){
+      message.textContent='รหัสผ่านทั้งสองช่องต้องตรงกัน';
+      return;
+    }
+    const salt=crypto.getRandomValues(new Uint8Array(16));
+    const digest=await passwordDigest(password,salt);
+    output.value="UPDATE users SET salt='"+hex(salt)+"', digest='"+digest+"' WHERE login='dcc' AND role='admin';";
+    form.reset();
+    output.select();
+    message.textContent='คัดลอกคำสั่งด้านล่างไปรันใน D1 Console เพื่อยืนยันการเปลี่ยนรหัส';
+  });`;
+  const html=`<!doctype html><html lang="th"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ตั้งรหัสผ่าน dcc ใหม่</title><main style="max-width:38rem;margin:6vh auto;padding:1rem;font:18px/1.6 system-ui"><h1>ตั้งรหัสผ่าน dcc ใหม่</h1><p>ขั้นที่ 1 ตั้งรหัสผ่านบนอุปกรณ์นี้</p><form><label>รหัสผ่านใหม่ (12–128 ตัวอักษร)<br><input name="password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></label><p><label>ยืนยันรหัสผ่านใหม่<br><input name="confirm" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></label></p><button>สร้างคำสั่งเปลี่ยนรหัสผ่าน</button></form><p role="status"></p><textarea readonly rows="5" style="width:100%" aria-label="คำสั่ง SQL"></textarea><p>ขั้นที่ 2 เปิด Cloudflare Dashboard → D1 → wi-training-center-db → Console วางคำสั่งแล้วกด Execute หรือ Run เมื่อแก้ไขสำเร็จ 1 แถว ให้เปิดเว็บ WI ในหน้าต่างส่วนตัวและเข้าสู่ระบบด้วยชื่อ dcc และรหัสใหม่</p><a href="/">เปิดเว็บ WI</a></main><script nonce="${nonce}">${script}</script></html>`;
+  return response(html,200,{'Content-Type':'text/html; charset=utf-8','Content-Security-Policy':"default-src 'none'; script-src 'nonce-"+nonce+"'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'","Referrer-Policy":"no-referrer"});
+}
 export default {async fetch(req,env){
   try{
     const url=new URL(req.url),path=url.pathname,db=env.DB;
+    if(path==='/recover' && req.method==='GET')return recoverPage();
     await prepareDatabase(db);
     if(path==='/setup')return await setup(req,env);
     if(path==='/' && req.method==='GET' && !await db.prepare('SELECT 1 FROM users LIMIT 1').first()){
