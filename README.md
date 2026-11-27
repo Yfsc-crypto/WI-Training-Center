@@ -2,7 +2,21 @@
 
 เว็บภาษาไทยสำหรับคลัง WI และประวัติการอบรม เก็บข้อมูลและไฟล์ PDF ใน SQLite บนเซิร์ฟเวอร์ ทุกคนใช้ฐานข้อมูลเดียวกัน
 
-## เริ่มใช้งาน
+## เปิดใช้งานบน Cloudflare
+
+[Deploy to Cloudflare](https://deploy.workers.cloudflare.com/?url=https://github.com/Yfsc-crypto/WI-Training-Center)
+
+เลือกบัญชี Cloudflare ของบริษัทและ repository นี้ใน Workers & Pages ใช้ Worker ชื่อ `wi-training-center` เลือกหรือสร้าง D1 สำหรับ binding `DB` และ private R2 bucket สำหรับ binding `PDFS` ตาม wrangler.jsonc หากตั้งค่าผ่าน Git integration ให้ใช้ deploy command `npx wrangler deploy` และ root เป็นโฟลเดอร์หลักของ repository
+
+หลัง deploy ครั้งแรก เปิด **Storage & databases → D1 → ฐานข้อมูลของแอป → Console** แล้วรันคำสั่งใน [cloudflare/schema.sql](cloudflare/schema.sql) ให้ครบ จากนั้นสร้างบัญชี DCC บนเครื่องของผู้ดูแลด้วยคำสั่งนี้
+
+```sh
+python cloudflare/user_sql.py --login dcc --name "Document Control" --role admin --dc "PTT DC" --dept QS
+```
+
+ตั้งรหัสผ่านใน Terminal แล้วนำเฉพาะคำสั่ง INSERT ที่ได้ไปรันใน D1 Console เพิ่มบัญชีหัวหน้าและพนักงานด้วยวิธีเดียวกันโดยใช้ role `lead` หรือ `employee` เปิด URL workers.dev จากหน้า Worker และเข้าสู่ระบบเพื่อเริ่มใช้ เก็บ SQL ที่สร้างบัญชีไว้เป็นความลับ ห้ามนำขึ้น GitHub
+
+## เริ่มใช้งาน Python ในเครื่อง
 
 ใช้ Python 3.11 ขึ้นไป บนเครื่องที่มีฐานข้อมูลเขตเวลา IANA (บน Windows อาจต้องติดตั้ง tzdata) เปิด Terminal ในโฟลเดอร์ที่มี app.py
 
@@ -23,7 +37,7 @@ python app.py serve
 4. หัวหน้างานบันทึกผลของพนักงานใน DC และแผนกของตน เลือกฉบับที่มีผลในวันที่อบรม ผู้บันทึกเป็นผู้สอนตามบัญชีที่เข้าสู่ระบบ พนักงานดูประวัติของตนเองได้ DCC ดูภาพรวมทุกทีม
 5. เมนูติดตามจับคู่ขอบเขต WI กับ DC และแผนกของพนักงาน Dashboard นับคู่พนักงาน–WI และส่งออก CSV ภาษาไทยสำหรับเปิดใน Excel ได้
 
-## การเปิดให้ทีมใช้งาน
+## การเปิดให้ทีมใช้งานบนเซิร์ฟเวอร์ Python
 
 GitHub เก็บซอร์สโค้ด แอปนี้ต้องใช้เซิร์ฟเวอร์ Python พร้อมพื้นที่เก็บข้อมูลถาวร GitHub Pages ให้บริการไฟล์สแตติก จึงรันส่วนบันทึกข้อมูลของแอปนี้ไม่ได้
 
