@@ -48,9 +48,11 @@ function exportPassportForms(){
       out.push({id:c.id,topic:c.topic,type:'Training',document:c.id,revision:'',pass:c.passScore,questions});
     }catch(err){errors.push(c.id+' '+c.topic+' — '+err.message);}
   }
-  if(out.length)DriveApp.createFile('YFSC-Forms-Import.json',JSON.stringify({format:'yfsc-forms-v1',courses:out},null,2),MimeType.PLAIN_TEXT);
-  console.log('ส่งออก '+out.length+' หลักสูตร');
   if(errors.length)console.log(errors.join('\n'));
+  if(!out.length)throw Error('ยังสร้างไฟล์ไม่ได้ เพราะส่งออกได้ 0 หลักสูตร ดูสาเหตุรายหลักสูตรใน Execution log ด้านบน');
+  const file=DriveApp.createFile('YFSC-Forms-Import.json',JSON.stringify({format:'yfsc-forms-v1',courses:out},null,2),MimeType.PLAIN_TEXT);
+  console.log('ส่งออกได้ '+out.length+' จาก '+PASSPORT_FORMS.length+' หลักสูตร');
+  console.log('เปิดไฟล์ YFSC-Forms-Import.json ที่นี่ '+file.getUrl());
 }
 
 const PASSPORT_FORMS = [
