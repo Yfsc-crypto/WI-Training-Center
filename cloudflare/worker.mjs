@@ -57,8 +57,11 @@ async function setup(req,env){
     return setupPage('<p>มีบัญชีในระบบแล้ว</p><a href="/">เข้าสู่ระบบ WI</a>');
   }
   const secret=env.WI_SETUP_KEY;
-  if(typeof secret!=='string'||secret.length<16){
-    return setupPage('<p>ให้ผู้ดูแลเปิด Worker → Settings → Variables and Secrets เพิ่ม Secret ชื่อ <b>WI_SETUP_KEY</b> ตั้งรหัสตั้งค่าอย่างน้อย 16 ตัวอักษร กด Deploy แล้วเปิดหน้านี้อีกครั้ง</p>',503);
+  if(typeof secret!=='string'){
+    return setupPage('<p>Worker เวอร์ชันที่เปิดอยู่นี้ยังไม่ได้รับค่า <b>WI_SETUP_KEY</b></p><p>เปิด Cloudflare → Workers &amp; Pages → wi-training-center → Settings → Variables and Secrets ตรวจชื่อ WI_SETUP_KEY ใน Production ถ้ามีอยู่แล้ว ให้ตรวจใน Deployments ว่าเวอร์ชันที่บันทึก Secret ถูก Deploy แล้ว จากนั้นรีเฟรชหน้านี้</p>',503);
+  }
+  if(secret.length<16){
+    return setupPage('<p>พบ WI_SETUP_KEY แล้ว แต่รหัสตั้งค่าสั้นกว่า 16 ตัวอักษร</p><p>เปิด Settings → Variables and Secrets กด <b>Rotate</b> ในแถว WI_SETUP_KEY กรอกรหัสใหม่อย่างน้อย 16 ตัวอักษร กด Deploy แล้วรีเฟรชหน้านี้</p>',503);
   }
   if(req.method==='GET')return setupPage('<form method="post" action="/setup"><p>ชื่อผู้ใช้ <b>dcc</b></p><p><label>รหัสตั้งค่าจาก Cloudflare<br><input type="password" name="token" required autocomplete="off"></label></p><p><label>ตั้งรหัสผ่านสำหรับเข้าเว็บ WI (อย่างน้อย 12 ตัว)<br><input type="password" name="password" required minlength="12" maxlength="128" autocomplete="new-password"></label></p><p><label>ยืนยันรหัสผ่าน<br><input type="password" name="confirm" required autocomplete="new-password"></label></p><button>สร้างบัญชี DCC</button></form>');
   requireValue(req.method==='POST','Method not allowed',405);
