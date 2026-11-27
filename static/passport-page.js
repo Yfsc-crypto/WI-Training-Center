@@ -122,9 +122,14 @@ async function start(root,isPublic=false){
   try{
    let note='บันทึกแล้ว';
    if(action==='import'||action==='forms'){
-    const file=JSON.parse(await fd.get('file').text());
+    const upload=fd.get('file');
+    let file;
+    try{file=JSON.parse((await upload.text()).replace(/^\uFEFF/,''));}
+    catch{throw Error('เปิด '+upload.name+' ไม่ได้ กรุณาเลือกไฟล์ .json ที่ดาวน์โหลดจาก Execution log');}
     if(action==='forms'){
-     if(!['yfsc-forms-v1','yfsc-forms-v2','yfsc-forms-v3'].includes(file.format)||!Array.isArray(file.courses))throw Error('รูปแบบไฟล์ข้อสอบไม่ถูกต้อง');
+     if(file?.format==='yfsc-passport-v1')throw Error('ไฟล์ '+upload.name+' เป็นทะเบียนพนักงาน ให้ใช้ในเมนู “นำเข้าทะเบียน” สำหรับข้อสอบให้เลือก YFSC-Forms-Import.json จาก Execution log');
+     if(!Array.isArray(file?.courses)||!['yfsc-forms-v1','yfsc-forms-v2','yfsc-forms-v3'].includes(file.format))throw Error('ไฟล์ '+upload.name+' มีรูปแบบ '+String(file?.format||'ที่ระบุไม่ได้').slice(0,60)+' กรุณาเลือก YFSC-Forms-Import.json จากผลรันล่าสุด');
+     if(!file.courses.length)throw Error('ไฟล์นี้มี 0 หลักสูตร กรุณาตรวจ Execution log ของการส่งออก');
      for(const c of file.courses)await api(false,{}, {...c,action:'course',edit:true});
      note='นำเข้าข้อสอบ '+file.courses.length+' หลักสูตรแล้ว';
     }else{
