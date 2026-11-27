@@ -1,1 +1,14 @@
 :root{font:16px/1.55 "Leelawadee UI",Tahoma,system-ui,sans-serif;color:#192e42;background:#f4f7fa}*{box-sizing:border-box}body{margin:0}header{background:#102c47;color:white;padding:22px max(5vw,20px);display:flex;justify-content:space-between;align-items:center;gap:16px}header span{color:#56cbbd;margin:0 10px}main{width:min(1150px,92%);margin:30px auto}nav,.bar,#actions,.buttons{display:flex;align-items:center;gap:10px;flex-wrap:wrap}nav{border-bottom:1px solid #cdd7de;padding-bottom:15px}button,.link{font:inherit;border:1px solid #c8d4dd;background:white;border-radius:8px;color:#173d53;padding:7px 13px;cursor:pointer;text-decoration:none}button.active,.primary{background:#11685f;border-color:#11685f;color:white}button:hover,.link:hover{box-shadow:0 0 0 2px #77bcb3}h1{font-size:clamp(25px,4vw,39px);margin:25px 0 14px;letter-spacing:-.03em}h2{margin:6px 0 16px}.bar{justify-content:space-between;margin:18px 0}input,select,textarea{font:inherit;border:1px solid #aabbc6;border-radius:7px;padding:8px 10px;background:white;color:inherit;max-width:100%}#search{width:min(350px,100%)}#content,.scroll{overflow:auto;background:white;border-radius:12px}table{border-collapse:collapse;width:100%;text-align:left}th,td{padding:13px 16px;border-bottom:1px solid #e2e9ef;vertical-align:top}th{background:#e8eef3;font-size:.9rem;white-space:nowrap}td:first-child{font-weight:600}.empty{padding:32px;margin:0;text-align:center;color:#526779}dialog{width:min(850px,96vw);max-height:90vh;border:0;border-radius:14px;padding:24px;color:inherit}dialog::backdrop{background:#132d4380}.close{float:right}.entry{display:grid;gap:12px;clear:both}.entry label{display:grid;gap:3px}.entry label.check{display:flex;gap:8px}.entry button{justify-self:start}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}.card{background:#e1f0ec;padding:15px 20px;border-radius:10px}.card b{display:block;font-size:1.8rem}.buttons{margin:14px 0}#error,#status{color:#972d26}small{font-size:.87rem}.tag{white-space:nowrap;color:#126353}a{color:#146964}
+
+.bar[hidden]{display:none}
+body{background:#f3f6fa;color:#183049}
+header{background:white;color:#123f69;border-bottom:1px solid #dce4ed}
+header span{color:#869aae}
+button.active,.primary{background:#123f69;border-color:#123f69;color:white}
+.passport-box{padding:20px clamp(16px,3vw,32px);border-bottom:1px solid #dce4ed}
+.passport-box h2{color:#123f69}.passport-box h3{margin:.65rem 0}
+#passport-lookup{display:flex;flex-wrap:wrap;align-items:end;gap:12px}
+#passport-lookup label{display:grid;gap:5px;flex:1;min-width:min(240px,100%)}
+.course-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));gap:12px}
+.course-list article{border:1px solid #dce4ed;border-radius:9px;padding:16px;display:flex;justify-content:space-between;align-items:center;gap:12px}
+.course-list .link{display:inline-block;color:#123f69}.course-list img{width:90px;height:90px}

@@ -16,8 +16,12 @@ async function load(){
  render();
 }
 function render(){
- $('nav').innerHTML=tabs.map((t,i)=>button('tab',t,i,i===tab?'active':'')).join('');
- $('h1').textContent=tabs[tab];$('#stats').innerHTML='';$('#actions').innerHTML='';
+ const navigation=data.passportEnabled?[...tabs,'Training Passport']:tabs;
+ if(data.passportEnabled && location.hash==='#passport')tab=4;
+ $('nav').innerHTML=navigation.map((t,i)=>button('tab',t,i,i===tab?'active':'')).join('');
+ $('h1').textContent=navigation[tab];$('#stats').innerHTML='';$('#actions').innerHTML='';
+ $('.bar').hidden=tab===4;
+ if(tab===4){renderPassport();return;}
  const query=$('#search').value.trim().toLowerCase();
  const match=r=>r.some(x=>String(x).toLowerCase().includes(query));
  let heads,rows,display;
@@ -65,7 +69,7 @@ async function post(path,obj){const res=await fetch('/api/'+path,{method:'POST',
 document.addEventListener('click',async ev=>{
  const b=ev.target.closest('[data-action]');if(!b)return;
  const {action,value}=b.dataset;
- if(action==='tab'){tab=Number(value);$('#search').value='';render();}
+ if(action==='tab'){tab=Number(value);history.replaceState(null,'',location.pathname+(tab===4?'#passport':''));$('#search').value='';render();}
  if(action==='detail')detail(value);
  if(action==='upload')upload(value);
  if(action==='train')train();
@@ -87,3 +91,29 @@ document.addEventListener('submit',async ev=>{
 });
 $('#search').addEventListener('input',render);
 load().catch(e=>$('#status').textContent=e.message);
+
+const passportOrigin='https://yfsc-training-passport.t-thanatcha04.chatgpt.site';
+function renderPassport(){
+ const content=$('#content');
+ content.innerHTML='<section class="passport-box"><h2>ประวัติอบรมรายบุคคล</h2><form id="passport-lookup"><label>ลิงก์จาก QR ประจำตัวพนักงาน<input name="link" type="url" placeholder="https://…/?p=…" required autocomplete="off"></label><button class="primary">ดูประวัติรวม</button></form><p><a href="'+passportOrigin+'/?view=employee" target="_blank" rel="noopener noreferrer">ค้นหาด้วยชื่อ รหัสพนักงาน หรือทะเบียนรถใน Passport</a></p><div id="passport-history" aria-live="polite"></div></section><section class="passport-box"><h2>แบบอบรมพนักงานขนส่ง</h2><div id="passport-courses" aria-live="polite">กำลังโหลดแบบอบรม…</div></section>'+(admin()?'<p class="passport-box"><a href="'+passportOrigin+'/?admin=1" target="_blank" rel="noopener noreferrer">จัดการรอบอบรมและอนุมัติผลใน Training Passport</a></p>':'');
+ const destination=$('#passport-courses');
+ fetch('/api/passport-courses').then(async res=>{
+   if(!res.ok)throw Error();const {courses}=await res.json();
+   destination.className='course-list';
+   destination.innerHTML=courses.map(c=>'<article><div><small>'+esc(c.id)+'</small><h3>'+esc(c.topic)+'</h3>'+(c.score?'<p>เกณฑ์ผ่าน '+esc(c.score)+' คะแนน</p>':'')+'<a class="link" href="'+esc(c.url)+'" target="_blank" rel="noopener noreferrer">เปิดแบบอบรม</a></div>'+(c.qr?'<img loading="lazy" referrerpolicy="no-referrer" src="'+esc(c.qr)+'" alt="QR '+esc(c.topic)+'" width="100" height="100">':'')+'</article>').join('');
+ }).catch(()=>{destination.innerHTML='โหลดแบบอบรมไม่สำเร็จ · <a href="'+passportOrigin+'/transport-training" target="_blank" rel="noopener noreferrer">เปิดแบบอบรมที่ต้นทาง</a>';});
+}
+document.addEventListener('submit',async event=>{
+ const form=event.target;if(form.id!=='passport-lookup')return;
+ event.preventDefault();
+ const target=$('#passport-history'),submit=form.querySelector('button');
+ submit.disabled=true;target.textContent='กำลังโหลดประวัติ…';
+ try{
+   const res=await fetch('/api/passport',{method:'POST',headers:{'Content-Type':'application/json','X-WI-Request':'1'},body:JSON.stringify({link:form.elements.link.value.trim()})});
+   const payload=await res.json();if(!res.ok)throw Error(payload.error);
+   const {employee,history}=payload;
+   const wi=data.history.filter(r=>r.employee===employee.id).map(r=>[r.day,r.code,revLabel(r.rev),r.result,'คลัง WI']);
+   const rows=history.map(r=>[r.date,r.topic||r.document,r.revision==null||r.revision===''?'—':String(r.revision),r.result,'Training Passport']).concat(wi).sort((a,b)=>String(b[0]||'').localeCompare(String(a[0]||'')));
+   target.innerHTML='<h3>'+esc(employee.name)+' · '+esc(employee.id)+'</h3><p>'+esc(employee.department)+'</p><div class="scroll">'+table(['วันที่','หัวข้อ / รหัสเอกสาร','Rev.','ผล','แหล่งข้อมูล'],rows.map(r=>r.map(esc)))+'</div>';
+ }catch(err){target.textContent=err.message||'โหลดประวัติไม่สำเร็จ';}finally{submit.disabled=false;}
+});

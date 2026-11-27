@@ -1,3 +1,4 @@
+import {readPassport,readCourses} from './passport.mjs';
 const encoder = new TextEncoder();
 const maxPdf = 12 * 1024 * 1024;
 const headers = {'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY'};
@@ -218,9 +219,11 @@ export default {async fetch(req,env){
     }
     const user=await authenticate(req,db);
     if(!user)return response('Sign in',401,{'WWW-Authenticate':'Basic realm="WI Center", charset="UTF-8"'});
+    if(path==='/api/passport' && req.method==='POST')return await readPassport(req);
+    if(path==='/api/passport-courses' && req.method==='GET')return await readCourses();
     const today=new Date(Date.now()+7*3600000).toISOString().slice(0,10);
     if(req.method==='GET'){
-      if(path==='/api/data')return response(JSON.stringify(await snapshot(db,user,today)),200,{'Content-Type':'application/json'});
+      if(path==='/api/data')return response(JSON.stringify({...await snapshot(db,user,today),passportEnabled:true}),200,{'Content-Type':'application/json'});
       if(/^\/pdf\/\d+$/.test(path)){
         const row=await statement(db,'SELECT * FROM revs WHERE id=? AND (approved IS NOT NULL OR ?=\'admin\')',Number(path.slice(5)),user.role).first();
         requireValue(row,'ไม่พบไฟล์',404);
