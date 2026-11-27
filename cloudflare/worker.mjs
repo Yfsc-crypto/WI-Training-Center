@@ -20,6 +20,27 @@ function date(obj,key){
 }
 function statement(db,sql,...args){return db.prepare(sql).bind(...args);}
 function response(body,status=200,extra={}){return new Response(body,{status,headers:{...headers,...extra}});}
+// Each schema statement is idempotent, including the revision-order trigger.
+const initialSchema = [
+  "CREATE TABLE IF NOT EXISTS users(login TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('admin','lead','employee')), dc TEXT NOT NULL, dept TEXT NOT NULL, salt TEXT NOT NULL, digest TEXT NOT NULL);",
+  "CREATE TABLE IF NOT EXISTS docs(code TEXT PRIMARY KEY,title TEXT NOT NULL,dc TEXT NOT NULL,dept TEXT NOT NULL);",
+  "CREATE TABLE IF NOT EXISTS revs(id INTEGER PRIMARY KEY,code TEXT NOT NULL REFERENCES docs(code),rev INTEGER NOT NULL,effective TEXT NOT NULL,summary TEXT NOT NULL,retrain INTEGER NOT NULL,creator TEXT NOT NULL REFERENCES users(login),approved TEXT REFERENCES users(login),object_key TEXT NOT NULL UNIQUE,UNIQUE(code,rev));",
+  "CREATE TRIGGER IF NOT EXISTS enforce_revision_order BEFORE INSERT ON revs WHEN EXISTS(SELECT 1 FROM revs WHERE code=NEW.code AND (rev>=NEW.rev OR effective>NEW.effective)) BEGIN SELECT RAISE(ABORT,'revision order'); END;",
+  "CREATE TABLE IF NOT EXISTS training(id INTEGER PRIMARY KEY,employee TEXT NOT NULL REFERENCES users(login),revision INTEGER NOT NULL REFERENCES revs(id),day TEXT NOT NULL,trainer TEXT NOT NULL REFERENCES users(login),result TEXT NOT NULL);"
+];
+let initializedDB;
+async function prepareDatabase(db){
+  requireValue(db && typeof db.prepare==='function','ไม่พบ D1 binding ชื่อ DB ใน Worker',503);
+  if(initializedDB===db)return;
+  const objects=await db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE (type='table' AND name IN ('users','docs','revs','training')) OR (type='trigger' AND name='enforce_revision_order')").first();
+  if(objects.n!==5){
+    for(const sql of initialSchema)await db.prepare(sql).run();
+  }
+  initializedDB=db;
+}
+async function pdfOperation(action){
+  try{return await action();}catch{throw new HttpError(503,'เข้าถึงไฟล์ PDF ไม่สำเร็จ กรุณาตรวจ R2 binding ชื่อ PDFS');}
+}
 async function authenticate(req,db){
   const raw=req.headers.get('Authorization') || '';
   if(!raw.startsWith('Basic ')) return null;
@@ -28,7 +49,11 @@ async function authenticate(req,db){
   const split=credentials.indexOf(':');
   if(split<1)return null;
   const user=await statement(db,'SELECT * FROM users WHERE login=?',credentials.slice(0,split)).first();
-  if(!user)return null;
+  if(!user){
+    const existing=await db.prepare('SELECT 1 FROM users LIMIT 1').first();
+    if(!existing)throw new HttpError(503,'เตรียมฐานข้อมูล WI แล้ว กรุณาให้ผู้ดูแลสร้างบัญชี DCC แรกใน D1 ตามคู่มือ');
+    return null;
+  }
   const salt=Uint8Array.from(user.salt.match(/../g),v=>parseInt(v,16));
   const key=await crypto.subtle.importKey('raw',encoder.encode(credentials.slice(split+1)),'PBKDF2',false,['deriveBits']);
   const bits=await crypto.subtle.deriveBits({name:'PBKDF2',hash:'SHA-256',iterations:100000,salt},key,256);
@@ -86,7 +111,7 @@ async function upload(env,user,obj){
   }
   const key=crypto.randomUUID()+'.pdf';
   writes.push(statement(db,'INSERT INTO revs(code,rev,effective,summary,retrain,creator,object_key) VALUES(?,?,?,?,?,?,?)',code,rev,day,summary,obj.retrain?1:0,user.login,key));
-  await env.PDFS.put(key,bytes);
+  await pdfOperation(()=>env.PDFS.put(key,bytes));
   try{await db.batch(writes);}catch(err){
     if(/revision order|UNIQUE constraint/i.test(String(err))){
       await env.PDFS.delete(key);
@@ -108,6 +133,7 @@ async function train(db,user,obj,today){
 export default {async fetch(req,env){
   try{
     const url=new URL(req.url),path=url.pathname,db=env.DB;
+    await prepareDatabase(db);
     const user=await authenticate(req,db);
     if(!user)return response('Sign in',401,{'WWW-Authenticate':'Basic realm="WI Center", charset="UTF-8"'});
     const today=new Date(Date.now()+7*3600000).toISOString().slice(0,10);
@@ -116,7 +142,7 @@ export default {async fetch(req,env){
       if(/^\/pdf\/\d+$/.test(path)){
         const row=await statement(db,'SELECT * FROM revs WHERE id=? AND (approved IS NOT NULL OR ?=\'admin\')',Number(path.slice(5)),user.role).first();
         requireValue(row,'ไม่พบไฟล์',404);
-        const obj=await env.PDFS.get(row.object_key);
+        const obj=await pdfOperation(()=>env.PDFS.get(row.object_key));
         requireValue(obj,'ไม่พบไฟล์',404);
         const mode=url.searchParams.has('download')?'attachment':'inline';
         return response(obj.body,200,{'Content-Type':'application/pdf','Content-Disposition':mode+'; filename="'+row.code+'_Rev'+String(row.rev).padStart(2,'0')+'.pdf"'});
@@ -145,6 +171,7 @@ export default {async fetch(req,env){
   }catch(err){
     if(err instanceof HttpError)return response(err.message,err.status);
     if(err instanceof SyntaxError)return response('ข้อมูลไม่ถูกต้อง',400);
-    return response('ระบบยังไม่พร้อม กรุณาตรวจสอบการตั้งค่า D1 และ R2',503);
+    if(/D1_|SQLITE_|no such (table|column)/i.test(String(err)))return response('อ่านหรือบันทึกฐานข้อมูล WI ไม่สำเร็จ กรุณาตรวจ D1 binding DB และโครงสร้างตาราง',503);
+    return response('ประมวลผลคำขอไม่สำเร็จ กรุณาแจ้งผู้ดูแลระบบ WI',503);
   }
 }};
