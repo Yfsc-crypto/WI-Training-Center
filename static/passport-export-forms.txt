@@ -7,6 +7,47 @@
 หากระบบระบุว่าหาฟอร์มไม่พบ ให้ใส่ลิงก์ /edit ในช่อง editUrl ของหลักสูตรนั้น แล้วรันอีกครั้ง
 สคริปต์อ่านคำถามจากต้นฉบับ สร้างไฟล์ JSON ใน Drive ของผู้รัน ไฟล์มีเฉลย ให้เฉพาะผู้ดูแลใช้
 */
+function videoId(text){
+  const m=String(text||'').match(/(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube(?:-nocookie)?\.com\/(?:watch\?[^\s]*?v=|embed\/|shorts\/)|youtu\.be\/)([\w-]{11})(?![\w-])/i);
+  return m?m[1]:null;
+}
+function formVideos(form){
+  const videos={};
+  try{
+    const response=UrlFetchApp.fetch('https://forms.googleapis.com/v1/forms/'+encodeURIComponent(form.getId()),{
+      headers:{Authorization:'Bearer '+ScriptApp.getOAuthToken()},muteHttpExceptions:true});
+    if(response.getResponseCode()===200){
+      for(const item of JSON.parse(response.getContentText()).items||[]){
+        const id=videoId(item.videoItem?.video?.youtubeUri);
+        if(id)videos[parseInt(item.itemId,16)>>>0]=id;
+      }
+    }
+  }catch(e){}
+  return videos;
+}
+function publishedVideos(form){
+  const videos={};
+  try{
+    const html=UrlFetchApp.fetch(form.getPublishedUrl(),{muteHttpExceptions:true}).getContentText();
+    const data=html.match(/FB_PUBLIC_LOAD_DATA_\s*=\s*(\[[\s\S]*?\])\s*;\s*<\/script>/);
+    if(!data)return videos;
+    const items=JSON.parse(data[1])[1][1];
+    for(const item of items){
+      if(item[3]!==12)continue;
+      const ids=new Set();
+      function scan(v){
+        if(Array.isArray(v))v.forEach(scan);
+        else if(typeof v==='string'){
+          const id=videoId(v)||(/^[\w-]{11}$/.test(v)?v:null);
+          if(id)ids.add(id);
+        }
+      }
+      item.slice(4).forEach(scan);
+      if(ids.size===1)videos[item[0]>>>0]=[...ids][0];
+    }
+  }catch(e){}
+  return videos;
+}
 function exportPassportForms(){
   const out=[],errors=[];
   let owned;
@@ -44,11 +85,24 @@ function exportPassportForms(){
         if(!Number.isInteger(index)||index<=page)throw Error('พบเส้นทางย้อนกลับในส่วน '+(page+1)+' กรุณาตรวจเส้นทางในฟอร์ม');
         return index;
       }
-      let page=0;
+      let page=0,apiVideos,publicVideos;
+      const videos=[];
       pages[pages.length-1].next=-1;
       for(const item of items){
         const type=String(item.getType());
         if(type==='PAGE_BREAK'){pages[page].next=destination(item.asPageBreakItem(),page);page++;continue;}
+        if(type==='VIDEO'){
+          const video=item.asVideoItem(), key=item.getId()>>>0;
+          if(!apiVideos)apiVideos=formVideos(f);
+          let id=apiVideos[key];
+          if(!id){
+            if(!publicVideos)publicVideos=publishedVideos(f);
+            id=publicVideos[key]||videoId(item.getTitle())||videoId(video.getHelpText());
+          }
+          if(!id)throw Error('โปรดใส่ลิงก์ YouTube ของคลิปในคำอธิบายรายการวิดีโอ “'+(item.getTitle()||c.topic)+'” แล้วส่งออกอีกครั้ง');
+          videos.push({page,before:questions.length,id,title:item.getTitle()||c.topic});
+          continue;
+        }
         if(type==='SECTION_HEADER')continue;
         const access={MULTIPLE_CHOICE:['single','asMultipleChoiceItem'],LIST:['single','asListItem'],CHECKBOX:['checkbox','asCheckboxItem'],TEXT:['text','asTextItem'],PARAGRAPH_TEXT:['paragraph','asParagraphTextItem']}[type];
         if(!access)throw Error('ตรวจสอบรูปแบบคำถาม '+type+' ใน '+item.getTitle());
@@ -61,12 +115,12 @@ function exportPassportForms(){
         questions.push({page,other,routes,title:item.getTitle(),kind:access[0],choices:choices.map(x=>x.getValue()),correct,required:q.isRequired(),points});
       }
       if(!questions.length)throw Error('ไม่มีข้อคำถาม');
-      out.push({id:c.id,topic:c.topic,type:'Training',document:c.id,revision:'',pass:c.passScore,pages,questions});
+      out.push({id:c.id,topic:c.topic,type:'Training',document:c.id,revision:'',pass:c.passScore,pages,videos,questions});
     }catch(err){errors.push(c.id+' '+c.topic+' — '+err.message);}
   }
   if(errors.length)console.log(errors.join('\n'));
   if(!out.length)throw Error('ยังสร้างไฟล์ไม่ได้ เพราะส่งออกได้ 0 หลักสูตร ดูสาเหตุรายหลักสูตรใน Execution log ด้านบน');
-  const file=DriveApp.createFile('YFSC-Forms-Import.json',JSON.stringify({format:'yfsc-forms-v2',courses:out},null,2),MimeType.PLAIN_TEXT);
+  const file=DriveApp.createFile('YFSC-Forms-Import.json',JSON.stringify({format:'yfsc-forms-v3',courses:out},null,2),MimeType.PLAIN_TEXT);
   console.log('ส่งออกได้ '+out.length+' จาก '+PASSPORT_FORMS.length+' หลักสูตร');
   console.log('เปิดไฟล์ YFSC-Forms-Import.json ที่นี่ '+file.getUrl());
 }

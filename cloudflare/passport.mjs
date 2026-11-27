@@ -22,7 +22,7 @@ async function init(db){
  ready=db;
 }
 function visible(user,p){return p && (user.role==='admin'||(user.role==='lead'&&p.site===user.dc&&p.department===user.dept)||p.id===user.login);}
-function safeCourse(c){return {id:c.id,topic:c.topic,type:c.type,document:c.document,revision:c.revision,pass:c.pass,active:c.active,version:c.version,max:c.max,pages:c.pages,questions:(c.questions||[]).map(({title,choices,points,kind,required,page,routes,other})=>({title,choices,points,kind,required,page,routes,other}))};}
+function safeCourse(c){return {id:c.id,topic:c.topic,type:c.type,document:c.document,revision:c.revision,pass:c.pass,active:c.active,version:c.version,max:c.max,pages:c.pages,videos:c.videos,questions:(c.questions||[]).map(({title,choices,points,kind,required,page,routes,other})=>({title,choices,points,kind,required,page,routes,other}))};}
 function safeSession(s){return {id:s.id,topic:s.topic,revision:s.revision,date:s.date,start:s.start,end:s.end,status:s.status,location:s.location};}
 function open(s){return s&&s.status==='Open'&&s.start<=Date.now()&&Date.now()<s.end;}
 function courseList(rows){
@@ -125,7 +125,9 @@ async function write(db,user,b){
     return {page,routes,other:q.other===true,title:str(q.title,1000),kind,choices:choices.map(x=>str(x,1000)),correct,points:q.points,required:q.required!==false};
    });
    const max=qs.reduce((n,q)=>n+q.points,0);check(b.pass===null||(Number.isInteger(b.pass)&&b.pass>=0&&b.pass<=max),'เกณฑ์ผ่านเกินคะแนนเต็ม');
-   r={...r,pages:pages.map(p=>({title:str(p.title,1000),next:p.next})),questions:qs,pass:b.pass,max,version:id()};
+   const videos=b.videos||[];
+   check(Array.isArray(videos)&&videos.length<=100&&videos.every(v=>v&&typeof v.id==='string'&&/^[A-Za-z0-9_-]{11}$/.test(v.id)&&Number.isInteger(v.page)&&v.page>=0&&v.page<pages.length&&Number.isInteger(v.before)&&v.before>=0&&v.before<=qs.length),'ข้อมูลวิดีโอไม่ถูกต้อง');
+   r={...r,videos:videos.map(v=>({id:v.id,page:v.page,before:v.before,title:str(v.title,1000)})),pages:pages.map(p=>({title:str(p.title,1000),next:p.next})),questions:qs,pass:b.pass,max,version:id()};
   }
   await db.prepare("INSERT INTO passport_records VALUES('courses',?,?) ON CONFLICT(kind,id) DO UPDATE SET body=excluded.body").bind(key,JSON.stringify(r)).run();return {};
  }

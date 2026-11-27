@@ -18,8 +18,9 @@ async function api(publicOnly,params={},data){
 function quiz(c){
  const pages=c.pages||[{title:''}];
  const groups=pages.map((p,page)=>{
+  const media=(i)=>(c.videos||[]).filter(v=>v.page===page&&v.before===i&&/^[A-Za-z0-9_-]{11}$/.test(v.id)).map(v=>'<figure><figcaption>'+esc(v.title||c.topic)+'</figcaption><iframe loading="lazy" referrerpolicy="strict-origin-when-cross-origin" style="width:100%;max-width:720px;aspect-ratio:16/9;border:0" title="'+esc(v.title||c.topic)+'" src="https://www.youtube-nocookie.com/embed/'+v.id+'" allowfullscreen></iframe></figure>').join('');
   const questions=c.questions.map((q,i)=>{
-   if((q.page||0)!==page)return '';
+   if((q.page||0)!==page)return media(i);
    let fields;
    if(['text','paragraph'].includes(q.kind)){
     fields='<textarea name="q'+i+'" maxlength="5000" '+(q.required?'required':'')+'></textarea>';
@@ -28,9 +29,9 @@ function quiz(c){
     fields=choices.map((v,j)=>'<label><input type="'+(q.kind==='checkbox'?'checkbox':'radio')+'" name="q'+i+'" value="'+j+'" '+(q.required&&q.kind!=='checkbox'?'required':'')+'> '+esc(v)+'</label>').join('');
     if(q.other)fields+='<label hidden>ระบุคำตอบอื่น ๆ<input disabled maxlength="5000" name="other'+i+'"></label>';
    }
-   return '<fieldset><legend>'+esc((i+1)+'. '+q.title)+'</legend>'+fields+'</fieldset>';
+   return media(i)+'<fieldset><legend>'+esc((i+1)+'. '+q.title)+'</legend>'+fields+'</fieldset>';
   }).join('');
-  return '<fieldset data-page="'+page+'">'+(p.title?'<legend>'+esc(p.title)+'</legend>':'')+questions+'</fieldset>';
+  return '<fieldset data-page="'+page+'">'+(p.title?'<legend>'+esc(p.title)+'</legend>':'')+questions+media(c.questions.length)+'</fieldset>';
  }).join('');
  return form('take',c.topic,'<input type="hidden" name="course" value="'+esc(c.id)+'">'+groups,'ส่งคำตอบ');
 }
@@ -92,7 +93,7 @@ async function start(root,isPublic=false){
    if(op==='person'){
     selected=state.people.find(p=>p.id===key)||{};show(form('person',key?'แก้ไขพนักงาน':'เพิ่มพนักงาน',field('id','รหัสพนักงาน',key)+field('name','ชื่อ–นามสกุล',selected.name)+field('department','แผนก / บริษัท',selected.department)+field('site','DC',selected.site,'text',false)+field('plate','ทะเบียนรถ',selected.plate,'text',false)+'<label><input type="checkbox" name="active" '+(selected.active!==false?'checked':'')+'> ใช้งาน</label>'));if(key)find('[name=id]').readOnly=true;
    }
-   if(op==='course'){selected=state.courses.find(c=>c.id===key)||{};show(form('course','หลักสูตรและข้อสอบ',field('id','รหัสหลักสูตร',key)+field('topic','หัวข้อ',selected.topic)+field('type','ประเภท',selected.type||'Training')+field('revision','Rev.',selected.revision,'text',false)+field('pass','คะแนนผ่าน (เว้นว่างเพื่อตรวจผลเอง)',selected.pass??'','number',false)+'<fieldset><legend>ข้อสอบ</legend><div data-questions></div>'+button('เพิ่มคำถาม','question')+'</fieldset>'));if(key)find('[name=id]').readOnly=true;(selected.questions||[]).forEach(question);if(selected.pages?.length>1||selected.questions?.some(q=>q.other)){const fs=find('[data-questions]').parentElement;fs.disabled=true;fs.insertAdjacentHTML('beforebegin','<p>แก้ไขข้อสอบที่มีหลายส่วนหรือตัวเลือกอื่น ๆ ในฟอร์มต้นฉบับ แล้วนำเข้าอีกครั้ง</p>');}}
+   if(op==='course'){selected=state.courses.find(c=>c.id===key)||{};show(form('course','หลักสูตรและข้อสอบ',field('id','รหัสหลักสูตร',key)+field('topic','หัวข้อ',selected.topic)+field('type','ประเภท',selected.type||'Training')+field('revision','Rev.',selected.revision,'text',false)+field('pass','คะแนนผ่าน (เว้นว่างเพื่อตรวจผลเอง)',selected.pass??'','number',false)+'<fieldset><legend>ข้อสอบ</legend><div data-questions></div>'+button('เพิ่มคำถาม','question')+'</fieldset>'));if(key)find('[name=id]').readOnly=true;(selected.questions||[]).forEach(question);if(selected.videos?.length||selected.pages?.length>1||selected.questions?.some(q=>q.other)){const fs=find('[data-questions]').parentElement;fs.disabled=true;fs.insertAdjacentHTML('beforebegin','<p>แก้ไขข้อสอบที่มีหลายส่วนหรือตัวเลือกอื่น ๆ ในฟอร์มต้นฉบับ แล้วนำเข้าอีกครั้ง</p>');}}
    if(op==='question')question({});
    if(op==='removeQ')b.closest('[data-q]').remove();
    if(op==='forms')show('<p>ผู้ดูแลส่งออกคำถามจากบัญชีเจ้าของ Google Forms ครั้งเดียว แล้วเลือกไฟล์ JSON ด้านล่าง <a href="/passport-export-forms.txt" download>ดาวน์โหลดสคริปต์ส่งออกพร้อมวิธีใช้</a></p>'+form('forms','นำเข้าแบบอบรมจาก Google Forms','<label>ไฟล์ข้อสอบที่ส่งออก (.json)<input name="file" type="file" accept=".json" required></label>','นำเข้าข้อสอบ'));
@@ -123,7 +124,7 @@ async function start(root,isPublic=false){
    if(action==='import'||action==='forms'){
     const file=JSON.parse(await fd.get('file').text());
     if(action==='forms'){
-     if(!['yfsc-forms-v1','yfsc-forms-v2'].includes(file.format)||!Array.isArray(file.courses))throw Error('รูปแบบไฟล์ข้อสอบไม่ถูกต้อง');
+     if(!['yfsc-forms-v1','yfsc-forms-v2','yfsc-forms-v3'].includes(file.format)||!Array.isArray(file.courses))throw Error('รูปแบบไฟล์ข้อสอบไม่ถูกต้อง');
      for(const c of file.courses)await api(false,{}, {...c,action:'course',edit:true});
      note='นำเข้าข้อสอบ '+file.courses.length+' หลักสูตรแล้ว';
     }else{
@@ -136,7 +137,7 @@ async function start(root,isPublic=false){
     b.action=action;
     if(action==='course'){
      b.edit=!!selected.id;b.pass=b.pass===''?null:Number(b.pass);b.questions=[...f.querySelectorAll('[data-q]')].map(q=>{const v=n=>q.querySelector('[name='+n+']').value.trim();return {title:v('title'),kind:v('qkind'),points:Number(v('points')),required:q.querySelector('[name=qrequired]').checked,choices:v('choices')?v('choices').split('\n').filter(Boolean):[],correct:v('correct')?v('correct').split(',').map(n=>Number(n.trim())-1):[]};});
-     if(f.querySelector('[data-questions]').parentElement.disabled){b.questions=selected.questions;b.pages=selected.pages;}
+     if(f.querySelector('[data-questions]').parentElement.disabled){b.questions=selected.questions;b.pages=selected.pages;b.videos=selected.videos;}
      if(!b.questions.length){if(selected.questions?.length){b.pass=null;}else delete b.questions;}
     }
     if(action==='person'){b.edit=!!selected.id;b.active=fd.has('active');}
