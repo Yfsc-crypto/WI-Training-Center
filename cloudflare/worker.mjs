@@ -50,7 +50,7 @@ async function passwordDigest(password,salt){
   return hex(bits);
 }
 function setupPage(body,status=200){
-  return response('<!doctype html><html lang="th"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ตั้งค่าบัญชี DCC</title><main style="max-width:32rem;margin:8vh auto;padding:1rem;font:18px/1.6 system-ui"><h1>ตั้งค่าบัญชี DCC</h1>'+body+'</main></html>',status,{'Content-Type':'text/html; charset=utf-8','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'","Referrer-Policy":"no-referrer"});
+  return response('<!doctype html><html lang="th"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ตั้งค่าบัญชี DCC</title><main style="max-width:32rem;margin:8vh auto;padding:1rem;font:18px/1.6 system-ui"><h1>ตั้งค่าบัญชี DCC</h1>'+body+'</main></html>',status,{'Content-Type':'text/html; charset=utf-8','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'","Referrer-Policy":"same-origin"});
 }
 async function setup(req,env){
   if(await env.DB.prepare('SELECT 1 FROM users LIMIT 1').first()){
@@ -65,7 +65,9 @@ async function setup(req,env){
   }
   if(req.method==='GET')return setupPage('<form method="post" action="/setup"><p>ชื่อผู้ใช้ <b>dcc</b></p><p><label>รหัสตั้งค่าจาก Cloudflare<br><input type="password" name="token" required autocomplete="off"></label></p><p><label>ตั้งรหัสผ่านสำหรับเข้าเว็บ WI (อย่างน้อย 12 ตัว)<br><input type="password" name="password" required minlength="12" maxlength="128" autocomplete="new-password"></label></p><p><label>ยืนยันรหัสผ่าน<br><input type="password" name="confirm" required autocomplete="new-password"></label></p><button>สร้างบัญชี DCC</button></form>');
   requireValue(req.method==='POST','Method not allowed',405);
-  requireValue(req.headers.get('Origin')===new URL(req.url).origin,'กรุณาเปิดหน้าตั้งค่าจากเว็บ WI',403);
+  const origin=req.headers.get('Origin');
+  const sameOriginNavigation=(origin===null || origin==='null') && req.headers.get('Sec-Fetch-Site')==='same-origin';
+  requireValue(origin===new URL(req.url).origin || sameOriginNavigation,'โปรดเปิด /setup ในแท็บใหม่ แล้วส่งแบบฟอร์มอีกครั้ง',403);
   requireValue(req.headers.get('Content-Type')?.startsWith('application/x-www-form-urlencoded'),'รูปแบบข้อมูลไม่ถูกต้อง');
   requireValue(Number(req.headers.get('Content-Length')??0)<=8192,'ข้อมูลใหญ่เกินกำหนด',413);
   const form=new URLSearchParams(await req.text());
