@@ -41,6 +41,46 @@ async function prepareDatabase(db){
 async function pdfOperation(action){
   try{return await action();}catch{throw new HttpError(503,'เข้าถึงไฟล์ PDF ไม่สำเร็จ กรุณาตรวจ R2 binding ชื่อ PDFS');}
 }
+function hex(bytes){
+  return Array.from(new Uint8Array(bytes),b=>b.toString(16).padStart(2,'0')).join('');
+}
+async function passwordDigest(password,salt){
+  const key=await crypto.subtle.importKey('raw',encoder.encode(password),'PBKDF2',false,['deriveBits']);
+  const bits=await crypto.subtle.deriveBits({name:'PBKDF2',hash:'SHA-256',iterations:100000,salt},key,256);
+  return hex(bits);
+}
+function setupPage(body,status=200){
+  return response('<!doctype html><html lang="th"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ตั้งค่าบัญชี DCC</title><main style="max-width:32rem;margin:8vh auto;padding:1rem;font:18px/1.6 system-ui"><h1>ตั้งค่าบัญชี DCC</h1>'+body+'</main></html>',status,{'Content-Type':'text/html; charset=utf-8','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'","Referrer-Policy":"no-referrer"});
+}
+async function setup(req,env){
+  if(await env.DB.prepare('SELECT 1 FROM users LIMIT 1').first()){
+    return setupPage('<p>มีบัญชีในระบบแล้ว</p><a href="/">เข้าสู่ระบบ WI</a>');
+  }
+  const secret=env.WI_SETUP_KEY;
+  if(typeof secret!=='string'||secret.length<16){
+    return setupPage('<p>ให้ผู้ดูแลเปิด Worker → Settings → Variables and Secrets เพิ่ม Secret ชื่อ <b>WI_SETUP_KEY</b> ตั้งรหัสตั้งค่าอย่างน้อย 16 ตัวอักษร กด Deploy แล้วเปิดหน้านี้อีกครั้ง</p>',503);
+  }
+  if(req.method==='GET')return setupPage('<form method="post" action="/setup"><p>ชื่อผู้ใช้ <b>dcc</b></p><p><label>รหัสตั้งค่าจาก Cloudflare<br><input type="password" name="token" required autocomplete="off"></label></p><p><label>ตั้งรหัสผ่านสำหรับเข้าเว็บ WI (อย่างน้อย 12 ตัว)<br><input type="password" name="password" required minlength="12" maxlength="128" autocomplete="new-password"></label></p><p><label>ยืนยันรหัสผ่าน<br><input type="password" name="confirm" required autocomplete="new-password"></label></p><button>สร้างบัญชี DCC</button></form>');
+  requireValue(req.method==='POST','Method not allowed',405);
+  requireValue(req.headers.get('Origin')===new URL(req.url).origin,'กรุณาเปิดหน้าตั้งค่าจากเว็บ WI',403);
+  requireValue(req.headers.get('Content-Type')?.startsWith('application/x-www-form-urlencoded'),'รูปแบบข้อมูลไม่ถูกต้อง');
+  requireValue(Number(req.headers.get('Content-Length')??0)<=8192,'ข้อมูลใหญ่เกินกำหนด',413);
+  const form=new URLSearchParams(await req.text());
+  const token=form.get('token')||'';
+  const hash=value=>crypto.subtle.digest('SHA-256',encoder.encode(value));
+  const [given,expected]=await Promise.all([hash(token),hash(secret)]);
+  let diff=0;
+  const a=new Uint8Array(given),b=new Uint8Array(expected);
+  for(let i=0;i<a.length;i++)diff|=a[i]^b[i];
+  requireValue(diff===0,'รหัสตั้งค่าไม่ตรงกับ WI_SETUP_KEY',403);
+  const password=form.get('password');
+  requireValue(password && password.length>=12 && password.length<=128 && password===form.get('confirm') && password!==token,'กรุณาตั้งรหัสผ่านใหม่ 12–128 ตัวให้ต่างจากรหัสตั้งค่า และยืนยันให้ตรงกัน');
+  const salt=crypto.getRandomValues(new Uint8Array(16));
+  const digest=await passwordDigest(password,salt);
+  const result=await statement(env.DB,"INSERT INTO users(login,name,role,dc,dept,salt,digest) SELECT 'dcc','Document Control','admin','PTT DC','QS',?,? WHERE NOT EXISTS(SELECT 1 FROM users)",hex(salt),digest).run();
+  requireValue(result.meta.changes===1,'มีบัญชีในระบบแล้ว',409);
+  return setupPage('<p>สร้างบัญชี <b>dcc</b> แล้ว ใช้รหัสผ่านที่เพิ่งตั้งเพื่อเปิดคลัง WI</p><a href="/">เข้าสู่ระบบ WI</a>');
+}
 async function authenticate(req,db){
   const raw=req.headers.get('Authorization') || '';
   if(!raw.startsWith('Basic ')) return null;
@@ -55,9 +95,7 @@ async function authenticate(req,db){
     return null;
   }
   const salt=Uint8Array.from(user.salt.match(/../g),v=>parseInt(v,16));
-  const key=await crypto.subtle.importKey('raw',encoder.encode(credentials.slice(split+1)),'PBKDF2',false,['deriveBits']);
-  const bits=await crypto.subtle.deriveBits({name:'PBKDF2',hash:'SHA-256',iterations:100000,salt},key,256);
-  const digest=Array.from(new Uint8Array(bits),b=>b.toString(16).padStart(2,'0')).join('');
+  const digest=await passwordDigest(credentials.slice(split+1),salt);
   let diff=digest.length^user.digest.length;
   for(let i=0;i<digest.length;i++)diff|=digest.charCodeAt(i)^user.digest.charCodeAt(i);
   return diff===0?user:null;
@@ -134,6 +172,10 @@ export default {async fetch(req,env){
   try{
     const url=new URL(req.url),path=url.pathname,db=env.DB;
     await prepareDatabase(db);
+    if(path==='/setup')return await setup(req,env);
+    if(path==='/' && req.method==='GET' && !await db.prepare('SELECT 1 FROM users LIMIT 1').first()){
+      return response(null,303,{Location:'/setup'});
+    }
     const user=await authenticate(req,db);
     if(!user)return response('Sign in',401,{'WWW-Authenticate':'Basic realm="WI Center", charset="UTF-8"'});
     const today=new Date(Date.now()+7*3600000).toISOString().slice(0,10);
