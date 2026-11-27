@@ -16,7 +16,23 @@ async function api(publicOnly,params={},data){
  const out=await res.json();if(!res.ok)throw Error(out.error||'ทำรายการไม่สำเร็จ');return out;
 }
 function quiz(c){
- return form('take',c.topic,'<input type="hidden" name="course" value="'+esc(c.id)+'">'+c.questions.map((q,i)=>'<fieldset><legend>'+esc((i+1)+'. '+q.title)+'</legend>'+(q.kind==='text'||q.kind==='paragraph'?'<textarea name="q'+i+'" maxlength="5000" '+(q.required?'required':'')+'></textarea>':q.choices.map((v,j)=>'<label><input type="'+(q.kind==='checkbox'?'checkbox':'radio')+'" name="q'+i+'" value="'+j+'" '+(q.required&&q.kind!=='checkbox'?'required':'')+'> '+esc(v)+'</label>').join(''))+'</fieldset>').join(''),'ส่งคำตอบ');
+ const pages=c.pages||[{title:''}];
+ const groups=pages.map((p,page)=>{
+  const questions=c.questions.map((q,i)=>{
+   if((q.page||0)!==page)return '';
+   let fields;
+   if(['text','paragraph'].includes(q.kind)){
+    fields='<textarea name="q'+i+'" maxlength="5000" '+(q.required?'required':'')+'></textarea>';
+   }else{
+    const choices=q.other?[...q.choices,'อื่น ๆ (โปรดระบุ)']:q.choices;
+    fields=choices.map((v,j)=>'<label><input type="'+(q.kind==='checkbox'?'checkbox':'radio')+'" name="q'+i+'" value="'+j+'" '+(q.required&&q.kind!=='checkbox'?'required':'')+'> '+esc(v)+'</label>').join('');
+    if(q.other)fields+='<label hidden>ระบุคำตอบอื่น ๆ<input disabled maxlength="5000" name="other'+i+'"></label>';
+   }
+   return '<fieldset><legend>'+esc((i+1)+'. '+q.title)+'</legend>'+fields+'</fieldset>';
+  }).join('');
+  return '<fieldset data-page="'+page+'">'+(p.title?'<legend>'+esc(p.title)+'</legend>':'')+questions+'</fieldset>';
+ }).join('');
+ return form('take',c.topic,'<input type="hidden" name="course" value="'+esc(c.id)+'">'+groups,'ส่งคำตอบ');
 }
 async function start(root,isPublic=false){
  root.className='pp';root.innerHTML='<div role="status"></div><nav></nav><div data-pane></div><section data-detail></section>';
@@ -56,7 +72,18 @@ async function start(root,isPublic=false){
   show('<h3>QR '+(param==='s'?'ลงชื่อเข้ารอบอบรม':'ประจำตัวพนักงาน')+'</h3><canvas></canvas><p><a href="'+esc(u.href)+'" target="_blank" rel="noreferrer">เปิดหน้านี้ใน Cloudflare WI</a></p>'+button('พิมพ์ QR','print'));window.drawPassportQR(detail.querySelector('canvas'),u.href);
  }
  root.oninput=e=>{if(e.target.matches('[data-filter]')){query=e.target.value;find('[data-people]').innerHTML=listPeople();}};
- root.onchange=e=>{if(e.target.name==='kind'){const ext=e.target.value==='external';find('[data-external]').hidden=!ext;find('[data-internal]').hidden=ext;find('[name=person]').required=!ext;find('[name=company]').required=ext;find('[name=plate]').required=ext;}};
+ let quizRoute;
+ function syncQuiz(f){
+  const answers=selected.questions.map((q,i)=>Array.from(f.querySelectorAll('[name="q'+i+'"]:checked'),el=>Number(el.value)));
+  const active=quizRoute(selected,answers);
+  f.querySelectorAll('[data-page]').forEach(el=>{el.hidden=el.disabled=!active.has(Number(el.dataset.page));});
+  selected.questions.forEach((q,i)=>{
+   if(!q.other)return;
+   const el=f.elements['other'+i],enabled=active.has(q.page||0)&&answers[i].includes(q.choices.length);
+   el.disabled=el.parentElement.hidden=!enabled;el.required=enabled;
+  });
+ }
+ root.onchange=e=>{if(e.target.form?.dataset.form==='take')syncQuiz(e.target.form);if(e.target.name==='kind'){const ext=e.target.value==='external';find('[data-external]').hidden=!ext;find('[data-internal]').hidden=ext;find('[name=person]').required=!ext;find('[name=company]').required=ext;find('[name=plate]').required=ext;}};
  root.onclick=async e=>{
   const b=e.target.closest('[data-op]');if(!b)return;const {op,key}=b.dataset;notify('');
   try{
@@ -65,7 +92,7 @@ async function start(root,isPublic=false){
    if(op==='person'){
     selected=state.people.find(p=>p.id===key)||{};show(form('person',key?'แก้ไขพนักงาน':'เพิ่มพนักงาน',field('id','รหัสพนักงาน',key)+field('name','ชื่อ–นามสกุล',selected.name)+field('department','แผนก / บริษัท',selected.department)+field('site','DC',selected.site,'text',false)+field('plate','ทะเบียนรถ',selected.plate,'text',false)+'<label><input type="checkbox" name="active" '+(selected.active!==false?'checked':'')+'> ใช้งาน</label>'));if(key)find('[name=id]').readOnly=true;
    }
-   if(op==='course'){selected=state.courses.find(c=>c.id===key)||{};show(form('course','หลักสูตรและข้อสอบ',field('id','รหัสหลักสูตร',key)+field('topic','หัวข้อ',selected.topic)+field('type','ประเภท',selected.type||'Training')+field('revision','Rev.',selected.revision,'text',false)+field('pass','คะแนนผ่าน (เว้นว่างเพื่อตรวจผลเอง)',selected.pass??'','number',false)+'<fieldset><legend>ข้อสอบ</legend><div data-questions></div>'+button('เพิ่มคำถาม','question')+'</fieldset>'));if(key)find('[name=id]').readOnly=true;(selected.questions||[]).forEach(question);}
+   if(op==='course'){selected=state.courses.find(c=>c.id===key)||{};show(form('course','หลักสูตรและข้อสอบ',field('id','รหัสหลักสูตร',key)+field('topic','หัวข้อ',selected.topic)+field('type','ประเภท',selected.type||'Training')+field('revision','Rev.',selected.revision,'text',false)+field('pass','คะแนนผ่าน (เว้นว่างเพื่อตรวจผลเอง)',selected.pass??'','number',false)+'<fieldset><legend>ข้อสอบ</legend><div data-questions></div>'+button('เพิ่มคำถาม','question')+'</fieldset>'));if(key)find('[name=id]').readOnly=true;(selected.questions||[]).forEach(question);if(selected.pages?.length>1||selected.questions?.some(q=>q.other)){const fs=find('[data-questions]').parentElement;fs.disabled=true;fs.insertAdjacentHTML('beforebegin','<p>แก้ไขข้อสอบที่มีหลายส่วนหรือตัวเลือกอื่น ๆ ในฟอร์มต้นฉบับ แล้วนำเข้าอีกครั้ง</p>');}}
    if(op==='question')question({});
    if(op==='removeQ')b.closest('[data-q]').remove();
    if(op==='forms')show('<p>ผู้ดูแลส่งออกคำถามจากบัญชีเจ้าของ Google Forms ครั้งเดียว แล้วเลือกไฟล์ JSON ด้านล่าง <a href="/passport-export-forms.txt" download>ดาวน์โหลดสคริปต์ส่งออกพร้อมวิธีใช้</a></p>'+form('forms','นำเข้าแบบอบรมจาก Google Forms','<label>ไฟล์ข้อสอบที่ส่งออก (.json)<input name="file" type="file" accept=".json" required></label>','นำเข้าข้อสอบ'));
@@ -78,7 +105,7 @@ async function start(root,isPublic=false){
     detail.querySelectorAll('canvas').forEach((canvas,i)=>{const u=new URL('/passport',location.origin);u.searchParams.set('p',people[i].token);window.drawPassportQR(canvas,u.href);});
    }
    if(op==='print')window.print();
-   if(op==='quiz'){selected=state.courses.find(c=>c.id===key);show(quiz(selected));}
+   if(op==='quiz'){selected=state.courses.find(c=>c.id===key);quizRoute=(await import('/passport-route.mjs')).quizRoute;show(quiz(selected));syncQuiz(find('form[data-form=take]'));}
    if(op==='session')show(form('session','สร้างรอบอบรม','<label>หัวข้อ<select required name="course">'+opts(state.courses.filter(c=>c.active!==false).map(c=>[c.id,c.topic+' · '+c.id]))+'</select></label>'+field('start','เปิดลงชื่อ (เวลาไทย)','','datetime-local')+field('end','ปิดลงชื่อ (เวลาไทย)','','datetime-local')+field('location','สถานที่')));
    if(op==='close')show(form('close','ยืนยันปิดรับลงชื่อรอบ '+key,'<input type="hidden" name="id" value="'+esc(key)+'">','ปิดรับลงชื่อ'));
    if(op==='resolve')show(form('resolve','บันทึกผลตรวจข้อมูลเดิม','<input type="hidden" name="id" value="'+esc(key)+'">'+area('remark','ผลตรวจสอบ')));
@@ -96,7 +123,7 @@ async function start(root,isPublic=false){
    if(action==='import'||action==='forms'){
     const file=JSON.parse(await fd.get('file').text());
     if(action==='forms'){
-     if(file.format!=='yfsc-forms-v1'||!Array.isArray(file.courses))throw Error('รูปแบบไฟล์ข้อสอบไม่ถูกต้อง');
+     if(!['yfsc-forms-v1','yfsc-forms-v2'].includes(file.format)||!Array.isArray(file.courses))throw Error('รูปแบบไฟล์ข้อสอบไม่ถูกต้อง');
      for(const c of file.courses)await api(false,{}, {...c,action:'course',edit:true});
      note='นำเข้าข้อสอบ '+file.courses.length+' หลักสูตรแล้ว';
     }else{
@@ -109,13 +136,14 @@ async function start(root,isPublic=false){
     b.action=action;
     if(action==='course'){
      b.edit=!!selected.id;b.pass=b.pass===''?null:Number(b.pass);b.questions=[...f.querySelectorAll('[data-q]')].map(q=>{const v=n=>q.querySelector('[name='+n+']').value.trim();return {title:v('title'),kind:v('qkind'),points:Number(v('points')),required:q.querySelector('[name=qrequired]').checked,choices:v('choices')?v('choices').split('\n').filter(Boolean):[],correct:v('correct')?v('correct').split(',').map(n=>Number(n.trim())-1):[]};});
+     if(f.querySelector('[data-questions]').parentElement.disabled){b.questions=selected.questions;b.pages=selected.pages;}
      if(!b.questions.length){if(selected.questions?.length){b.pass=null;}else delete b.questions;}
     }
     if(action==='person'){b.edit=!!selected.id;b.active=fd.has('active');}
     if(action==='resolve'&&!b.remark.trim())throw Error('กรุณาระบุผลตรวจสอบ');
     if(action==='review'){if(b.score!==undefined)b.score=Number(b.score);b.id=selected.id;b.kind=selected.source==='แบบทดสอบ'?'scores':'attendance';}
     if(action==='checkin'){b.token=sessionToken;b.external=b.kind==='external';}
-    if(action==='take'){b.version=selected.version;b.card=cardToken;b.answers=selected.questions.map((q,i)=>['text','paragraph'].includes(q.kind)?String(fd.get('q'+i)||''):fd.getAll('q'+i).map(Number));}
+    if(action==='take'){b.otherText=Object.fromEntries(selected.questions.map((q,i)=>[i,fd.get('other'+i)]).filter(([,v])=>v));b.version=selected.version;b.card=cardToken;b.answers=selected.questions.map((q,i)=>['text','paragraph'].includes(q.kind)?String(fd.get('q'+i)||''):fd.getAll('q'+i).map(Number));}
     const r=await api(isPublic,{},b);note=r.message||note;
    }
    await reload();notify(note);

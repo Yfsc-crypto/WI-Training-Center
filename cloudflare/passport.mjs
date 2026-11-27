@@ -1,3 +1,4 @@
+import {quizRoute} from '../static/passport-route.mjs';
 import catalog from './catalog.mjs';
 const kinds=['people','courses','sessions','attendance','scores','issues'];
 const results=['ผ่าน','ไม่ผ่าน'];
@@ -21,7 +22,7 @@ async function init(db){
  ready=db;
 }
 function visible(user,p){return p && (user.role==='admin'||(user.role==='lead'&&p.site===user.dc&&p.department===user.dept)||p.id===user.login);}
-function safeCourse(c){return {id:c.id,topic:c.topic,type:c.type,document:c.document,revision:c.revision,pass:c.pass,active:c.active,version:c.version,max:c.max,questions:(c.questions||[]).map(({title,choices,points,kind,required})=>({title,choices,points,kind,required}))};}
+function safeCourse(c){return {id:c.id,topic:c.topic,type:c.type,document:c.document,revision:c.revision,pass:c.pass,active:c.active,version:c.version,max:c.max,pages:c.pages,questions:(c.questions||[]).map(({title,choices,points,kind,required,page,routes,other})=>({title,choices,points,kind,required,page,routes,other}))};}
 function safeSession(s){return {id:s.id,topic:s.topic,revision:s.revision,date:s.date,start:s.start,end:s.end,status:s.status,location:s.location};}
 function open(s){return s&&s.status==='Open'&&s.start<=Date.now()&&Date.now()<s.end;}
 function courseList(rows){
@@ -70,20 +71,25 @@ async function write(db,user,b){
   check(p&&p.active!==false,'กรุณาใช้ Passport ประจำตัว หรือจับคู่รหัส WI กับทะเบียนพนักงาน');
   check(b.version===c.version,'แบบทดสอบเปลี่ยนแปลง กรุณาเปิดใหม่',409);
   check(Array.isArray(b.answers)&&b.answers.length===c.questions.length,'กรุณาตอบให้ครบ');
+  const visited=quizRoute(c,b.answers), otherText={};
   let score=0,manual=false;
   c.questions.forEach((q,i)=>{
+    if(!visited.has(q.page||0)){b.answers[i]=null;return;}
     const a=b.answers[i];
     if(q.kind==='text'||q.kind==='paragraph'){
       check(typeof a==='string'&&a.length<=5000&&(!q.required||a.trim()),'กรุณาตอบข้อ '+(i+1));
       if(q.points>0)manual=true;
     }else{
-      check(Array.isArray(a)&&(!q.required||a.length)&&a.every(n=>Number.isInteger(n)&&n>=0&&n<q.choices.length)&&new Set(a).size===a.length&&(q.kind==='checkbox'||a.length<=1),'ตรวจคำตอบข้อ '+(i+1));
+      check(Array.isArray(a)&&(!q.required||a.length)&&a.every(n=>Number.isInteger(n)&&n>=0&&n<q.choices.length+(q.other?1:0))&&new Set(a).size===a.length&&(q.kind==='checkbox'||a.length<=1),'ตรวจคำตอบข้อ '+(i+1));
+      if(q.other&&a.includes(q.choices.length)){
+        otherText[i]=str(b.otherText?.[i],5000);check(otherText[i],'กรุณาระบุคำตอบอื่น ๆ ข้อ '+(i+1));
+      }
       if(q.points&&!q.correct.length)manual=true;
       if(q.correct.length&&a.length===q.correct.length&&q.correct.every(n=>a.includes(n)))score+=q.points;
     }
   });
   const result=manual||c.pass===null?'รอตรวจสอบ':score>=c.pass?'ผ่าน':'ไม่ผ่าน';
-  const r={id:id(),person:p.id,name:p.name,topic:c.topic,revision:c.revision,date:today(),source:'แบบทดสอบ',score,max:c.questions.reduce((n,q)=>n+q.points,0),result,course:c.id,version:c.version,checked:Date.now(),answers:b.answers,questionTitles:c.questions.map(q=>q.title),answerText:c.questions.map((q,i)=>Array.isArray(b.answers[i])?b.answers[i].map(n=>q.choices[n]).join(', '):b.answers[i])};
+  const r={id:id(),person:p.id,name:p.name,topic:c.topic,revision:c.revision,date:today(),source:'แบบทดสอบ',score,max:c.questions.reduce((n,q)=>n+q.points,0),result,course:c.id,version:c.version,checked:Date.now(),answers:b.answers,otherText,questionTitles:c.questions.map(q=>q.title),answerText:c.questions.map((q,i)=>Array.isArray(b.answers[i])?b.answers[i].map(n=>n===q.choices.length?otherText[i]:q.choices[n]).join(', '):b.answers[i]??'ข้ามตามเงื่อนไข')};
   await insert(db,'scores',r).run();return {message:r.result+' · '+score+'/'+r.max+' คะแนน'};
  }
  requireAdmin(user);
@@ -105,15 +111,21 @@ async function write(db,user,b){
   let r={...prev,id:key,topic,type:str(b.type),document:str(b.document)||key,revision:str(b.revision),active:true};
   if(b.questions!==undefined){
    check(Array.isArray(b.questions)&&b.questions.length<=100,'แบบทดสอบไม่ถูกต้อง');
+   const pages=b.pages??[{title:'',next:-1}];
+   check(Array.isArray(pages)&&pages.length>0&&pages.length<=200,'ส่วนของแบบทดสอบไม่ถูกต้อง');
+   const validNext=(n,i)=>n===-1||(Number.isInteger(n)&&n>i&&n<pages.length);
+   check(pages.every((p,i)=>p&&validNext(p.next,i)),'เส้นทางของแบบทดสอบไม่ถูกต้อง');
    const qs=b.questions.map(q=>{
     const kind=q.kind||'single',choices=q.choices||[],correct=q.correct||[];
     check(str(q.title,1000)&&['single','checkbox','text','paragraph'].includes(kind)&&Number.isInteger(q.points)&&q.points>=0&&q.points<=100,'ตรวจคำถามและคะแนน');
-    check(Array.isArray(choices)&&choices.length<=100&&choices.every(x=>str(x,1000))&&Array.isArray(correct)&&correct.every(n=>Number.isInteger(n)&&n>=0&&n<choices.length),'ตรวจตัวเลือกและเฉลย');
+    check(Array.isArray(choices)&&choices.length<=2000&&choices.every(x=>str(x,1000))&&Array.isArray(correct)&&correct.every(n=>Number.isInteger(n)&&n>=0&&n<choices.length),'ตรวจตัวเลือกและเฉลย');
     if(kind==='single'||kind==='checkbox')check(choices.length>=1,'กรุณาระบุตัวเลือก');
-    return {title:str(q.title,1000),kind,choices:choices.map(x=>str(x,1000)),correct,points:q.points,required:q.required!==false};
+    const page=q.page??0,routes=q.routes??[];
+    check(Number.isInteger(page)&&page>=0&&page<pages.length&&Array.isArray(routes)&&routes.length<=choices.length&&routes.every(n=>n===null||validNext(n,page)),'เส้นทางคำถามไม่ถูกต้อง');
+    return {page,routes,other:q.other===true,title:str(q.title,1000),kind,choices:choices.map(x=>str(x,1000)),correct,points:q.points,required:q.required!==false};
    });
    const max=qs.reduce((n,q)=>n+q.points,0);check(b.pass===null||(Number.isInteger(b.pass)&&b.pass>=0&&b.pass<=max),'เกณฑ์ผ่านเกินคะแนนเต็ม');
-   r={...r,questions:qs,pass:b.pass,max,version:id()};
+   r={...r,pages:pages.map(p=>({title:str(p.title,1000),next:p.next})),questions:qs,pass:b.pass,max,version:id()};
   }
   await db.prepare("INSERT INTO passport_records VALUES('courses',?,?) ON CONFLICT(kind,id) DO UPDATE SET body=excluded.body").bind(key,JSON.stringify(r)).run();return {};
  }

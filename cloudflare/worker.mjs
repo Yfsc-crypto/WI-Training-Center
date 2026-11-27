@@ -219,7 +219,7 @@ export default {async fetch(req,env){
     }
     const publicMode=url.searchParams.get('mode');
     if(path==='/api/pp-public' && (req.method==='POST'||['card','session','quiz'].includes(publicMode)))return passportAPI(req,db,null);
-    if(req.method==='GET' && (path==='/passport-page.js'||path==='/passport-qr.js'||path==='/passport-public.css'||(path==='/passport'&&(url.searchParams.has('p')||url.searchParams.has('s'))))){
+    if(req.method==='GET' && (path==='/passport-route.mjs'||path==='/passport-page.js'||path==='/passport-qr.js'||path==='/passport-public.css'||(path==='/passport'&&(url.searchParams.has('p')||url.searchParams.has('s'))))){
       const asset=path==='/passport'?'/passport-card':path;
       return env.ASSETS.fetch(new Request(new URL(asset,url.origin)));
     }
