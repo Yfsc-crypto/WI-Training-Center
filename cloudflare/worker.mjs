@@ -1,4 +1,4 @@
-import {readPassport,readCourses} from './passport.mjs';
+import {passportAPI} from './passport.mjs';
 const encoder = new TextEncoder();
 const maxPdf = 12 * 1024 * 1024;
 const headers = {'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY'};
@@ -217,10 +217,15 @@ export default {async fetch(req,env){
     if(path==='/' && req.method==='GET' && !await db.prepare('SELECT 1 FROM users LIMIT 1').first()){
       return response(null,303,{Location:'/setup'});
     }
+    const publicMode=url.searchParams.get('mode');
+    if(path==='/api/pp-public' && (req.method==='POST'||['card','session','quiz'].includes(publicMode)))return passportAPI(req,db,null);
+    if(req.method==='GET' && (path==='/passport-page.js'||path==='/passport-qr.js'||path==='/passport-public.css'||(path==='/passport'&&(url.searchParams.has('p')||url.searchParams.has('s'))))){
+      const asset=path==='/passport'?'/passport-card':path;
+      return env.ASSETS.fetch(new Request(new URL(asset,url.origin)));
+    }
     const user=await authenticate(req,db);
     if(!user)return response('Sign in',401,{'WWW-Authenticate':'Basic realm="WI Center", charset="UTF-8"'});
-    if(path==='/api/passport' && req.method==='POST')return await readPassport(req);
-    if(path==='/api/passport-courses' && req.method==='GET')return await readCourses();
+    if(path==='/api/passport')return await passportAPI(req,db,user);
     const today=new Date(Date.now()+7*3600000).toISOString().slice(0,10);
     if(req.method==='GET'){
       if(path==='/api/data')return response(JSON.stringify({...await snapshot(db,user,today),passportEnabled:true}),200,{'Content-Type':'application/json'});
@@ -232,7 +237,8 @@ export default {async fetch(req,env){
         const mode=url.searchParams.has('download')?'attachment':'inline';
         return response(obj.body,200,{'Content-Type':'application/pdf','Content-Disposition':mode+'; filename="'+row.code+'_Rev'+String(row.rev).padStart(2,'0')+'.pdf"'});
       }
-      if(['/','/app.js','/style.css'].includes(path)){
+      if(path==='/passport-export-forms.txt' && user.role!=='admin')return response('เฉพาะผู้ดูแล DCC',403);
+      if(['/','/app.js','/style.css','/passport-export-forms.txt'].includes(path)){
         const asset=await env.ASSETS.fetch(req);
         const out=new Response(asset.body,asset);
         for(const [k,v] of Object.entries(headers))out.headers.set(k,v);

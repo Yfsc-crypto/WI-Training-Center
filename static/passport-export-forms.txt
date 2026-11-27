@@ -1,0 +1,137 @@
+/*
+วิธีส่งออก (ผู้มีสิทธิ์แก้ไข Google Forms)
+1. เปิด script.google.com ด้วยบัญชีที่แก้ไขฟอร์มได้ สร้าง New project
+2. คัดลอกข้อความทั้งหมดในไฟล์นี้ลง Code.gs แล้วกด Save
+3. เลือกฟังก์ชัน exportPassportForms แล้วกด Run อนุญาตให้อ่าน Forms และสร้างไฟล์ใน Drive
+4. ดาวน์โหลด YFSC-Forms-Import.json จาก My Drive จากนั้นเข้าเมนู Training Passport > หลักสูตรและแบบทดสอบ > นำเข้าข้อสอบ Google Forms ใน Cloudflare
+หากระบบระบุว่าหาฟอร์มไม่พบ ให้ใส่ลิงก์ /edit ในช่อง editUrl ของหลักสูตรนั้น แล้วรันอีกครั้ง
+สคริปต์อ่านคำถามจากต้นฉบับ สร้างไฟล์ JSON ใน Drive ของผู้รัน ไฟล์มีเฉลย ให้เฉพาะผู้ดูแลใช้
+*/
+function exportPassportForms(){
+  const out=[],errors=[];
+  let owned;
+  function openCourse(c){
+    if(c.editUrl)return FormApp.openByUrl(c.editUrl);
+    const resp=UrlFetchApp.fetch(c.url,{followRedirects:false,muteHttpExceptions:true});
+    const headers=resp.getAllHeaders(),url=headers.Location||headers.location;
+    if(!url)throw Error('กรุณาใส่ลิงก์แก้ไข /edit');
+    const canonical=s=>String(s).split('?')[0].replace(/\/$/,'');
+    try{return FormApp.openByUrl(url);}catch(e){}
+    if(!owned){
+      owned={};
+      const files=DriveApp.getFilesByType(MimeType.GOOGLE_FORMS);
+      while(files.hasNext()){
+        const file=files.next();
+        try{const form=FormApp.openById(file.getId());owned[canonical(form.getPublishedUrl())]=file.getId();}catch(e){}
+      }
+    }
+    const formId=owned[canonical(url)];
+    if(!formId)throw Error('บัญชีนี้ต้องมีสิทธิ์แก้ไขฟอร์ม หรือใส่ลิงก์ /edit');
+    return FormApp.openById(formId);
+  }
+  for(const c of PASSPORT_FORMS){
+    try{
+      const f=openCourse(c), questions=[];
+      for(const item of f.getItems()){
+        const type=String(item.getType());
+        if(type==='SECTION_HEADER')continue;
+        const access={MULTIPLE_CHOICE:['single','asMultipleChoiceItem'],LIST:['single','asListItem'],CHECKBOX:['checkbox','asCheckboxItem'],TEXT:['text','asTextItem'],PARAGRAPH_TEXT:['paragraph','asParagraphTextItem']}[type];
+        if(!access)throw Error('ตรวจสอบรูปแบบคำถาม '+type+' ใน '+item.getTitle());
+        const q=item[access[1]](),choices=q.getChoices?q.getChoices():[];
+        if(q.hasOtherOption&&q.hasOtherOption())throw Error('พบตัวเลือกอื่น ๆ ที่ต้องให้ผู้ดูแลตรวจรูปแบบ');
+        let points=0;if(f.isQuiz()&&q.getPoints)points=q.getPoints()||0;
+        const correct=[];
+        choices.forEach((x,i)=>{if(f.isQuiz()&&x.isCorrectAnswer&&x.isCorrectAnswer())correct.push(i);});
+        questions.push({title:item.getTitle(),kind:access[0],choices:choices.map(x=>x.getValue()),correct,required:q.isRequired(),points});
+      }
+      if(!questions.length)throw Error('ไม่มีข้อคำถาม');
+      out.push({id:c.id,topic:c.topic,type:'Training',document:c.id,revision:'',pass:c.passScore,questions});
+    }catch(err){errors.push(c.id+' '+c.topic+' — '+err.message);}
+  }
+  if(out.length)DriveApp.createFile('YFSC-Forms-Import.json',JSON.stringify({format:'yfsc-forms-v1',courses:out},null,2),MimeType.PLAIN_TEXT);
+  console.log('ส่งออก '+out.length+' หลักสูตร');
+  if(errors.length)console.log(errors.join('\n'));
+}
+
+const PASSPORT_FORMS = [
+  {
+    "topic": "ความปลอดภัยในการทำงาน",
+    "id": "OTH-0001",
+    "url": "https://forms.gle/e2iPe1G5BoQX7t2EA",
+    "passScore": 8,
+    "maxScore": 10,
+    "editUrl": ""
+  },
+  {
+    "topic": "อุปกรณ์คุ้มครองความปลอดภัยส่วนบุคคล (PPE)",
+    "id": "OTH-0002",
+    "url": "https://forms.gle/cyYkXYx5NJmLMehH6",
+    "passScore": 8,
+    "maxScore": 10,
+    "editUrl": ""
+  },
+  {
+    "topic": "การยศาสตร์ (Ergonomics)",
+    "id": "OTH-0003",
+    "url": "https://forms.gle/JKeB6dzoyfL8ceSJ6",
+    "passScore": 8,
+    "maxScore": 10,
+    "editUrl": ""
+  },
+  {
+    "topic": "5ส.",
+    "id": "OTH-0004",
+    "url": "https://forms.gle/qnCsfXRhoiAEF2bZ6",
+    "passScore": 6,
+    "maxScore": 8,
+    "editUrl": ""
+  },
+  {
+    "topic": "แผนตอบโต้ภาวะฉุกเฉิน กรณีโจรกรรม",
+    "id": "OTH-0005",
+    "url": "https://forms.gle/4mJ2AZaAdBhQA2829",
+    "passScore": 4,
+    "maxScore": 5,
+    "editUrl": ""
+  },
+  {
+    "topic": "การขับขี่เชิงป้องกันอุบัติเหตุ",
+    "id": "OTH-0006",
+    "url": "https://forms.gle/5f1BRzUjxzRVwd6e9",
+    "passScore": 8,
+    "maxScore": 8,
+    "editUrl": ""
+  },
+  {
+    "topic": "ขั้นตอนและระบบการส่งสินค้า",
+    "id": "OTH-0007",
+    "url": "https://forms.gle/LgtZaZzUUdsWkSRF7",
+    "passScore": 0,
+    "maxScore": 1,
+    "editUrl": ""
+  },
+  {
+    "topic": "KYT",
+    "id": "FORM-KYT",
+    "url": "https://forms.gle/SXTNSPGmDnyr6vQP9",
+    "passScore": 4,
+    "maxScore": 5,
+    "editUrl": ""
+  },
+  {
+    "topic": "Kaizen",
+    "id": "FORM-KAIZEN",
+    "url": "https://forms.gle/M64uotp8ZbJLW6xT7",
+    "passScore": 4,
+    "maxScore": 5,
+    "editUrl": ""
+  },
+  {
+    "topic": "Compliance Training",
+    "id": "FORM-COMPLIANCE",
+    "url": "https://forms.gle/gdBNXXjR7M1PT5Tn9",
+    "passScore": null,
+    "maxScore": null,
+    "editUrl": ""
+  }
+];
